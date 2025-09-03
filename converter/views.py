@@ -27,8 +27,11 @@ class ConvertExcelView(APIView):
     """
     API endpoint for converting Excel files to JSON format.
     
-    POST /api/convert-excel
+    POST /api/convert-excel?page=1&limit=1000
     - Input: Binary Excel file (multipart/form-data)
+    - Query Parameters (optional):
+      - page: Page number (starts from 1)
+      - limit: Number of rows per page (max 100,000)
     - Output: JSON array with each row as an object
     - Max file size: 100MB
     - Supported formats: .xlsx, .xls
@@ -69,17 +72,69 @@ class ConvertExcelView(APIView):
             
             uploaded_file = serializer.validated_data['file']
             
+            # Extract pagination parameters from query parameters
+            page = request.query_params.get('page')
+            limit = request.query_params.get('limit')
+            
+            # Validate pagination parameters
+            if page is not None or limit is not None:
+                try:
+                    if page is not None:
+                        page = int(page)
+                        if page < 1:
+                            raise ValueError("Page must be >= 1")
+                    if limit is not None:
+                        limit = int(limit)
+                        if limit < 1:
+                            raise ValueError("Limit must be >= 1")
+                        if limit > 100000:
+                            raise ValueError("Limit cannot exceed 100,000")
+                    
+                    # Both parameters must be provided together
+                    if (page is not None and limit is None) or (page is None and limit is not None):
+                        error_response = {
+                            'success': False,
+                            'error': {
+                                'code': 'VALIDATION_ERROR',
+                                'message': 'Invalid pagination parameters',
+                                'details': "Both 'page' and 'limit' query parameters must be provided together for pagination."
+                            }
+                        }
+                        logger.warning(
+                            f"Pagination validation failed - ID: {request_id}, "
+                            f"Page: {page}, Limit: {limit}"
+                        )
+                        return Response(error_response, status=status.HTTP_400_BAD_REQUEST)
+                        
+                except (ValueError, TypeError) as e:
+                    error_response = {
+                        'success': False,
+                        'error': {
+                            'code': 'VALIDATION_ERROR',
+                            'message': 'Invalid pagination parameters',
+                            'details': f"Invalid pagination parameter: {str(e)}"
+                        }
+                    }
+                    logger.warning(
+                        f"Pagination parameter error - ID: {request_id}, "
+                        f"Page: {request.query_params.get('page')}, "
+                        f"Limit: {request.query_params.get('limit')}, "
+                        f"Error: {str(e)}"
+                    )
+                    return Response(error_response, status=status.HTTP_400_BAD_REQUEST)
+            
             # Log processing started
+            pagination_info = f", Page: {page}, Limit: {limit}" if page and limit else ""
             logger.info(
                 f"Processing started - ID: {request_id}, "
                 f"File: {uploaded_file.name}, "
                 f"Size: {uploaded_file.size / (1024 * 1024):.1f}MB, "
-                f"Type: {uploaded_file.content_type}"
+                f"Type: {uploaded_file.content_type}{pagination_info}"
             )
             
             # Process the Excel file
             try:
-                result = process_excel_streaming(uploaded_file, batch_size=1000)
+                result = process_excel_streaming(uploaded_file, batch_size=1000, page=page, limit=limit)
                 
                 # Log successful processing
                 processing_time = time.time() - request_start_time

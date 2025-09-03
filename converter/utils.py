@@ -531,16 +531,18 @@ def process_xls_file(file_path: str, batch_size: int = 1000) -> Iterator[Dict[st
         raise ExcelProcessingError(f"Failed to process XLS file: {str(e)}")
 
 
-def process_excel_streaming(uploaded_file, batch_size: int = 1000) -> Dict[str, Any]:
+def process_excel_streaming(uploaded_file, batch_size: int = 1000, page: int = None, limit: int = None) -> Dict[str, Any]:
     """
-    Main function to process Excel file with streaming support.
+    Main function to process Excel file with streaming support and optional pagination.
     
     Args:
         uploaded_file: Django UploadedFile object
         batch_size: Number of rows to process in each batch
+        page: Page number for pagination (1-based, optional)
+        limit: Number of rows per page (optional)
         
     Returns:
-        Dictionary containing the complete processed data and metadata
+        Dictionary containing the processed data, metadata, and pagination info
     """
     start_time = time.time()
     temp_file_path = None
@@ -592,12 +594,51 @@ def process_excel_streaming(uploaded_file, batch_size: int = 1000) -> Dict[str, 
             elif result['type'] == 'summary':
                 summary_info = result
         
+        # Apply pagination if requested
+        original_total_rows = len(all_data)
+        pagination_info = None
+        
+        if page is not None and limit is not None:
+            # Calculate pagination
+            start_index = (page - 1) * limit
+            end_index = start_index + limit
+            
+            # Apply pagination to data
+            paginated_data = all_data[start_index:end_index]
+            
+            # Create pagination metadata
+            total_pages = (original_total_rows + limit - 1) // limit  # Ceiling division
+            has_next = page < total_pages
+            has_prev = page > 1
+            
+            pagination_info = {
+                'page': page,
+                'limit': limit,
+                'total_rows': original_total_rows,
+                'total_pages': total_pages,
+                'current_page_rows': len(paginated_data),
+                'has_next': has_next,
+                'has_prev': has_prev,
+                'start_index': start_index + 1 if paginated_data else 0,  # 1-based indexing
+                'end_index': start_index + len(paginated_data) if paginated_data else 0
+            }
+            
+            # Use paginated data
+            all_data = paginated_data
+            
+            logger.info(
+                f"Pagination applied: Page {page}/{total_pages}, "
+                f"Showing rows {pagination_info['start_index']}-{pagination_info['end_index']} "
+                f"of {original_total_rows} total rows"
+            )
+        
         # Calculate final metadata
         total_time = time.time() - start_time
         file_size_mb = uploaded_file.size / (1024 * 1024)
         
         metadata = {
-            'total_rows': len(all_data) - 1,  # Subtract header row
+            'total_rows': len(all_data),  # Current page rows (or all rows if no pagination)
+            'original_total_rows': original_total_rows,  # Always show total rows in file
             'processing_time': round(total_time, 3),
             'file_size': f"{file_size_mb:.1f}MB",
             'worksheet_name': 'Sheet1',  # Default name, could be enhanced
@@ -616,11 +657,17 @@ def process_excel_streaming(uploaded_file, batch_size: int = 1000) -> Dict[str, 
             f"{metadata['performance']['rows_per_second']} rows/sec"
         )
         
-        return {
+        result = {
             'success': True,
             'data': all_data,
             'metadata': metadata
         }
+        
+        # Add pagination info if pagination was used
+        if pagination_info is not None:
+            result['pagination'] = pagination_info
+            
+        return result
         
     except ExcelProcessingError:
         raise

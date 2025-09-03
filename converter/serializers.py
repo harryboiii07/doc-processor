@@ -104,6 +104,10 @@ class ExcelConversionResponseSerializer(serializers.Serializer):
     metadata = serializers.DictField(
         help_text="Processing metadata including row count, processing time, etc."
     )
+    pagination = serializers.DictField(
+        required=False,
+        help_text="Pagination information (present when pagination is used)"
+    )
 
 
 class ErrorResponseSerializer(serializers.Serializer):
