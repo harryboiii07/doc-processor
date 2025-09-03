@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: excel-converter-api
+    runtime: python3
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn excel_converter.wsgi:application --bind 0.0.0.0:$PORT --workers 4 --timeout 300"
+    plan: starter  # You can upgrade to standard or pro later
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: DEBUG
+        value: false
+      - key: ALLOWED_HOSTS
+        value: "*"  # Will be updated with your actual domain
+      - key: SECRET_KEY
+        generateValue: true  # Render will generate a secure secret key
+      - key: DATA_UPLOAD_MAX_MEMORY_SIZE
+        value: "104857600"  # 100MB
+      - key: FILE_UPLOAD_MAX_MEMORY_SIZE
+        value: "104857600"  # 100MB
+    disk:
+      name: excel-converter-disk
+      mountPath: /opt/render/project/src/media
+      sizeGB: 1  # For temporary file storage
