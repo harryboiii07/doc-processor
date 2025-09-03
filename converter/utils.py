@@ -309,9 +309,8 @@ def process_xlsx_file(file_path: str, batch_size: int = 1000, page: int = None, 
                     'type': 'summary',
                     'total_batches': 0,
                     'rows_per_second': 0,
-                    'memory_info': {
-                        'peak_mb': memory_monitor.get_peak_mb()
-                    }
+                    'memory_info': memory_monitor.get_memory_info(),
+                    'file_total_rows': total_rows - 1  # Exclude header row from total
                 }
                 return
         
@@ -483,9 +482,8 @@ def process_xls_file(file_path: str, batch_size: int = 1000, page: int = None, l
                     'type': 'summary',
                     'total_batches': 0,
                     'rows_per_second': 0,
-                    'memory_info': {
-                        'peak_mb': memory_monitor.get_peak_mb()
-                    }
+                    'memory_info': memory_monitor.get_memory_info(),
+                    'file_total_rows': total_rows - 1  # Exclude header row from total
                 }
                 return
         
