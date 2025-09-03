@@ -238,13 +238,15 @@ def get_column_headers(worksheet, file_type: str) -> Tuple[List[str], List[str],
     return unique_title_headers, actual_headers, max_columns
 
 
-def process_xlsx_file(file_path: str, batch_size: int = 1000) -> Iterator[Dict[str, Any]]:
+def process_xlsx_file(file_path: str, batch_size: int = 1000, page: int = None, limit: int = None) -> Iterator[Dict[str, Any]]:
     """
-    Process XLSX file using openpyxl with streaming support.
+    Process XLSX file using openpyxl with streaming support and optional pagination.
     
     Args:
         file_path: Path to the XLSX file
         batch_size: Number of rows to process in each batch
+        page: Page number for pagination (1-based, optional)
+        limit: Number of rows per page (optional)
         
     Yields:
         Dictionary containing batch processing results
@@ -288,11 +290,37 @@ def process_xlsx_file(file_path: str, batch_size: int = 1000) -> Iterator[Dict[s
             'max_columns': max_columns
         }
         
-        # Process data rows in batches - start from row 1 to capture all data
-        row_iterator = worksheet.iter_rows(min_row=1, values_only=True)
+        # Calculate pagination parameters
+        start_row_index = 1  # Start from row 1 (0-based)
+        rows_to_process = total_rows - 1  # Exclude header row
+        
+        if page is not None and limit is not None:
+            # Calculate which rows to skip and process for pagination
+            skip_rows = (page - 1) * limit
+            start_row_index = 1 + skip_rows  # Add 1 for header row
+            rows_to_process = min(limit, max(0, total_rows - start_row_index))
+            
+            logger.info(f"Pagination: Processing rows {start_row_index} to {start_row_index + rows_to_process - 1} (page {page}, limit {limit})")
+            
+            # If start row is beyond the file, return empty
+            if start_row_index >= total_rows:
+                logger.info(f"Pagination: Start row {start_row_index} beyond file size {total_rows}, returning empty result")
+                yield {
+                    'type': 'summary',
+                    'total_batches': 0,
+                    'rows_per_second': 0,
+                    'memory_info': {
+                        'peak_mb': memory_monitor.get_peak_mb()
+                    }
+                }
+                return
+        
+        # Process data rows in batches with pagination
+        end_row_index = start_row_index + rows_to_process
+        row_iterator = worksheet.iter_rows(min_row=start_row_index, max_row=end_row_index - 1, values_only=True)
         batch_count = 0
         total_processed = 0
-        row_number = 0
+        row_number = start_row_index - 1  # Adjust for 0-based counting
         
         for batch in batch_rows(row_iterator, batch_size):
             batch_count += 1
@@ -378,7 +406,8 @@ def process_xlsx_file(file_path: str, batch_size: int = 1000) -> Iterator[Dict[s
             'total_batches': batch_count,
             'processing_time': total_time,
             'memory_info': final_memory,
-            'rows_per_second': total_processed / total_time if total_time > 0 else 0
+            'rows_per_second': total_processed / total_time if total_time > 0 else 0,
+            'file_total_rows': total_rows - 1  # Exclude header row from total
         }
         
     except InvalidFileException as e:
@@ -394,13 +423,15 @@ def process_xlsx_file(file_path: str, batch_size: int = 1000) -> Iterator[Dict[s
             pass
 
 
-def process_xls_file(file_path: str, batch_size: int = 1000) -> Iterator[Dict[str, Any]]:
+def process_xls_file(file_path: str, batch_size: int = 1000, page: int = None, limit: int = None) -> Iterator[Dict[str, Any]]:
     """
-    Process XLS file using xlrd with batching support.
+    Process XLS file using xlrd with batching support and optional pagination.
     
     Args:
         file_path: Path to the XLS file
         batch_size: Number of rows to process in each batch
+        page: Page number for pagination (1-based, optional)
+        limit: Number of rows per page (optional)
         
     Yields:
         Dictionary containing batch processing results
@@ -433,15 +464,41 @@ def process_xls_file(file_path: str, batch_size: int = 1000) -> Iterator[Dict[st
             'max_columns': max_columns
         }
         
-        # Process data rows in batches (skip first 2 rows)
+        # Calculate pagination parameters
+        data_start_row = 1  # Start from row 1 (0-based, after header)
+        rows_to_process = total_rows - 1  # Exclude header row
+        
+        if page is not None and limit is not None:
+            # Calculate which rows to skip and process for pagination
+            skip_rows = (page - 1) * limit
+            data_start_row = 1 + skip_rows  # Add 1 for header row
+            rows_to_process = min(limit, max(0, total_rows - data_start_row))
+            
+            logger.info(f"Pagination: Processing rows {data_start_row} to {data_start_row + rows_to_process - 1} (page {page}, limit {limit})")
+            
+            # If start row is beyond the file, return empty
+            if data_start_row >= total_rows:
+                logger.info(f"Pagination: Start row {data_start_row} beyond file size {total_rows}, returning empty result")
+                yield {
+                    'type': 'summary',
+                    'total_batches': 0,
+                    'rows_per_second': 0,
+                    'memory_info': {
+                        'peak_mb': memory_monitor.get_peak_mb()
+                    }
+                }
+                return
+        
+        # Process data rows in batches with pagination
         batch_count = 0
         total_processed = 0
+        end_data_row = data_start_row + rows_to_process
         
-        for start_row in range(2, total_rows, batch_size):
+        for start_row in range(data_start_row, end_data_row, batch_size):
             batch_count += 1
             memory_monitor.update_peak()
             
-            end_row = min(start_row + batch_size, total_rows)
+            end_row = min(start_row + batch_size, end_data_row)
             batch_data = []
             
             for row_idx in range(start_row, end_row):
@@ -523,7 +580,8 @@ def process_xls_file(file_path: str, batch_size: int = 1000) -> Iterator[Dict[st
             'total_batches': batch_count,
             'processing_time': total_time,
             'memory_info': final_memory,
-            'rows_per_second': total_processed / total_time if total_time > 0 else 0
+            'rows_per_second': total_processed / total_time if total_time > 0 else 0,
+            'file_total_rows': total_rows - 1  # Exclude header row from total
         }
         
     except Exception as e:
@@ -570,9 +628,9 @@ def process_excel_streaming(uploaded_file, batch_size: int = 1000, page: int = N
         
         # Process file based on type
         if file_type == 'xlsx':
-            processor = process_xlsx_file(temp_file_path, batch_size)
+            processor = process_xlsx_file(temp_file_path, batch_size, page, limit)
         else:
-            processor = process_xls_file(temp_file_path, batch_size)
+            processor = process_xls_file(temp_file_path, batch_size, page, limit)
         
         # Collect all data
         all_data = []
@@ -594,42 +652,40 @@ def process_excel_streaming(uploaded_file, batch_size: int = 1000, page: int = N
             elif result['type'] == 'summary':
                 summary_info = result
         
-        # Apply pagination if requested
+        # Calculate pagination metadata if pagination was used
         original_total_rows = len(all_data)
         pagination_info = None
         
         if page is not None and limit is not None:
-            # Calculate pagination
-            start_index = (page - 1) * limit
-            end_index = start_index + limit
-            
-            # Apply pagination to data
-            paginated_data = all_data[start_index:end_index]
+            # We need to get the total rows from the file, not from processed data
+            # The processed data is already paginated at the file level
+            file_total_rows = summary_info.get('file_total_rows', len(all_data))
             
             # Create pagination metadata
-            total_pages = (original_total_rows + limit - 1) // limit  # Ceiling division
+            total_pages = (file_total_rows + limit - 1) // limit  # Ceiling division
             has_next = page < total_pages
             has_prev = page > 1
+            
+            # Calculate the actual range that was processed
+            start_index = (page - 1) * limit + 1  # 1-based indexing
+            end_index = start_index + len(all_data) - 1 if all_data else start_index - 1
             
             pagination_info = {
                 'page': page,
                 'limit': limit,
-                'total_rows': original_total_rows,
+                'total_rows': file_total_rows,
                 'total_pages': total_pages,
-                'current_page_rows': len(paginated_data),
+                'current_page_rows': len(all_data),
                 'has_next': has_next,
                 'has_prev': has_prev,
-                'start_index': start_index + 1 if paginated_data else 0,  # 1-based indexing
-                'end_index': start_index + len(paginated_data) if paginated_data else 0
+                'start_index': start_index if all_data else 0,
+                'end_index': end_index if all_data else 0
             }
             
-            # Use paginated data
-            all_data = paginated_data
-            
             logger.info(
-                f"Pagination applied: Page {page}/{total_pages}, "
+                f"Pagination metadata: Page {page}/{total_pages}, "
                 f"Showing rows {pagination_info['start_index']}-{pagination_info['end_index']} "
-                f"of {original_total_rows} total rows"
+                f"of {file_total_rows} total rows"
             )
         
         # Calculate final metadata
