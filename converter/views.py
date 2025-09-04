@@ -28,11 +28,14 @@ class ConvertExcelView(APIView):
     API endpoint for converting Excel files to JSON format.
     
     POST /api/convert-excel?page=1&limit=1000
-    - Input: Binary Excel file (multipart/form-data)
+    - Input: 
+      - file: Binary Excel file (multipart/form-data)
+      - data: Optional JSON column mapping configuration (multipart/form-data)
     - Query Parameters (optional):
       - page: Page number (starts from 1)
       - limit: Number of rows per page (max 100,000)
     - Output: JSON array with each row as an object
+    - If data parameter provided, response includes headerrow field
     - Max file size: 100MB
     - Supported formats: .xlsx, .xls
     """
@@ -71,6 +74,7 @@ class ConvertExcelView(APIView):
                 return Response(error_response, status=status.HTTP_400_BAD_REQUEST)
             
             uploaded_file = serializer.validated_data['file']
+            column_mapping_data = serializer.validated_data.get('data')
             
             # Extract pagination parameters from query parameters
             page = request.query_params.get('page')
@@ -125,11 +129,12 @@ class ConvertExcelView(APIView):
             
             # Log processing started
             pagination_info = f", Page: {page}, Limit: {limit}" if page and limit else ""
+            mapping_info = f", Column mapping: {'provided' if column_mapping_data else 'not provided'}"
             logger.info(
                 f"Processing started - ID: {request_id}, "
                 f"File: {uploaded_file.name}, "
                 f"Size: {uploaded_file.size / (1024 * 1024):.1f}MB, "
-                f"Type: {uploaded_file.content_type}{pagination_info}"
+                f"Type: {uploaded_file.content_type}{pagination_info}{mapping_info}"
             )
             
             # Process the Excel file
@@ -144,6 +149,11 @@ class ConvertExcelView(APIView):
                     f"Time: {processing_time:.2f}s, "
                     f"Speed: {result['metadata']['performance']['rows_per_second']} rows/sec"
                 )
+                
+                # Add column mapping data to response if provided
+                if column_mapping_data is not None:
+                    result['headerrow'] = column_mapping_data
+                    logger.info(f"Added column mapping data to response - ID: {request_id}")
                 
                 # Validate response format
                 response_serializer = ExcelConversionResponseSerializer(data=result)

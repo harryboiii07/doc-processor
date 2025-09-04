@@ -7,9 +7,10 @@ from rest_framework import serializers
 
 class ExcelFileUploadSerializer(serializers.Serializer):
     """
-    Serializer for Excel file upload validation.
+    Serializer for Excel file upload validation with optional column mapping data.
     """
     file = serializers.FileField()
+    data = serializers.JSONField(required=False, help_text="Optional column mapping configuration")
 
     def validate_file(self, value):
         """
@@ -90,6 +91,30 @@ class ExcelFileUploadSerializer(serializers.Serializer):
             raise serializers.ValidationError("Uploaded file is empty.")
 
         return value
+    
+    def validate_data(self, value):
+        """
+        Validate the optional data parameter structure.
+        """
+        if value is None:
+            return value
+            
+        # Basic validation - should be a list
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Data parameter must be a list of objects")
+        
+        # Validate each item has the expected structure
+        for i, item in enumerate(value):
+            if not isinstance(item, dict):
+                raise serializers.ValidationError(f"Item {i} in data must be an object")
+            
+            if 'required_columns' not in item:
+                raise serializers.ValidationError(f"Item {i} must contain 'required_columns' field")
+                
+            if not isinstance(item['required_columns'], list):
+                raise serializers.ValidationError(f"'required_columns' in item {i} must be a list")
+        
+        return value
 
 
 class ExcelConversionResponseSerializer(serializers.Serializer):
@@ -107,6 +132,10 @@ class ExcelConversionResponseSerializer(serializers.Serializer):
     pagination = serializers.DictField(
         required=False,
         help_text="Pagination information (present when pagination is used)"
+    )
+    headerrow = serializers.ListField(
+        required=False,
+        help_text="Column mapping configuration (present when data parameter is provided)"
     )
 
 
