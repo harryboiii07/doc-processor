@@ -1,6 +1,7 @@
 """
 Serializers for Excel conversion API.
 """
+import json
 import magic
 from rest_framework import serializers
 
@@ -10,7 +11,7 @@ class ExcelFileUploadSerializer(serializers.Serializer):
     Serializer for Excel file upload validation with optional column mapping data.
     """
     file = serializers.FileField()
-    data = serializers.JSONField(required=False, help_text="Optional column mapping configuration")
+    data = serializers.CharField(required=False, help_text="Optional column mapping configuration as stringified JSON")
 
     def validate_file(self, value):
         """
@@ -95,16 +96,23 @@ class ExcelFileUploadSerializer(serializers.Serializer):
     def validate_data(self, value):
         """
         Validate the optional data parameter structure.
+        Parse stringified JSON and validate the structure.
         """
-        if value is None:
-            return value
+        if value is None or value == "":
+            return None
             
+        # Parse stringified JSON
+        try:
+            parsed_data = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise serializers.ValidationError(f"Invalid JSON format in data parameter: {str(e)}")
+        
         # Basic validation - should be a list
-        if not isinstance(value, list):
+        if not isinstance(parsed_data, list):
             raise serializers.ValidationError("Data parameter must be a list of objects")
         
         # Validate each item has the expected structure
-        for i, item in enumerate(value):
+        for i, item in enumerate(parsed_data):
             if not isinstance(item, dict):
                 raise serializers.ValidationError(f"Item {i} in data must be an object")
             
@@ -114,7 +122,7 @@ class ExcelFileUploadSerializer(serializers.Serializer):
             if not isinstance(item['required_columns'], list):
                 raise serializers.ValidationError(f"'required_columns' in item {i} must be a list")
         
-        return value
+        return parsed_data
 
 
 class ExcelConversionResponseSerializer(serializers.Serializer):
